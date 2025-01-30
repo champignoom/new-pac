@@ -5,6 +5,9 @@ on:
     - cron: '0 * * * *'  # Runs once per hour at the start of the hour
   workflow_dispatch:  # Allows manual triggering of the workflow
 
+permissions:
+  contents: write
+
 jobs:
   process:
     runs-on: ubuntu-latest
