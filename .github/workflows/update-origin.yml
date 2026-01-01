@@ -33,7 +33,7 @@ jobs:
 
           headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-          # 1. Root page - force GB2312
+          # 1. Root page
           r = requests.get('https://freefq.com/v2ray/', headers=headers, timeout=30)
           r.raise_for_status()
           r.encoding = 'gb2312'
@@ -52,7 +52,7 @@ jobs:
               exit(1)
           print(f"Latest post: {latest_url}")
 
-          # 2. Post page - force GB2312
+          # 2. Post page
           r = requests.get(latest_url, headers=headers, timeout=30)
           r.raise_for_status()
           r.encoding = 'gb2312'
@@ -70,7 +70,7 @@ jobs:
               exit(1)
           print(f"Nodes page: {htm_url}")
 
-          # 3. .htm page - force GB2312
+          # 3. .htm page
           r = requests.get(htm_url, headers=headers, timeout=30)
           r.raise_for_status()
           r.encoding = 'gb2312'
@@ -79,28 +79,28 @@ jobs:
           links = []
           capture_next = False
           import_pattern = re.compile(r'^节点\d.*一键导入链接')
-
-          link_pattern = re.compile(r'^\w+://')  # Matches any word characters followed by ://
+          link_pattern = re.compile(r'^\w+://')
 
           for line in page_text.splitlines():
               line = line.strip()
-              if import_pattern.search(line):
+              if import_pattern.match(line):
                   capture_next = True
                   continue
               if capture_next and link_pattern.match(line):
                   links.append(line)
-                  capture_next = False  # One link per "一键导入链接" section
+                  capture_next = False
 
           if not links:
               print("WARNING: No links extracted")
 
           print(f"Extracted {len(links)} links")
 
-          content = '\n'.join(links) + '\n'
-          b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+          # 4. Base64 each link individually, then join with newlines
+          b64_lines = [base64.b64encode(link.encode('utf-8')).decode('utf-8') for link in links]
+          content = '\n'.join(b64_lines)
 
           with open('subscribe-new-pac', 'w', encoding='utf-8') as f:
-              f.write(b64)
+              f.write(content)
 
           PY
 
@@ -112,6 +112,6 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes"
           else
-            git commit -m "Update subscribe-new-pac from freefq.com"
+            git commit -m "Update subscription from freefq.com"
             git push
           fi
