@@ -36,7 +36,7 @@ jobs:
           # 1. Root page
           r = requests.get('https://freefq.com/v2ray/', headers=headers, timeout=30)
           r.raise_for_status()
-          r.encoding = r.apparent_encoding  # Auto-detect (handles gb2312/utf8 reliably)
+          r.encoding = 'gb2312'  # Required for correct Chinese title detection
           soup = BeautifulSoup(r.text, 'html.parser')
 
           latest_url = None
@@ -55,7 +55,8 @@ jobs:
           # 2. Post page
           r = requests.get(latest_url, headers=headers, timeout=30)
           r.raise_for_status()
-          r.encoding = r.apparent_encoding
+          # Post page is UTF-8, but gb2312 works too (no harm)
+          r.encoding = 'gb2312'
           soup = BeautifulSoup(r.text, 'html.parser')
 
           htm_url = None
@@ -70,12 +71,13 @@ jobs:
               exit(1)
           print(f"Nodes page: {htm_url}")
 
-          # 3. .htm page - parse as HTML to cleanly extract text lines (removes all tags)
+          # 3. .htm page - parse as HTML to strip all tags cleanly
           r = requests.get(htm_url, headers=headers, timeout=30)
           r.raise_for_status()
-          r.encoding = r.apparent_encoding
+          # No charset header/meta, but content works fine with gb2312 or utf-8 (links are ASCII-compatible)
+          r.encoding = 'gb2312'  # Safe choice
           soup = BeautifulSoup(r.text, 'html.parser')
-          page_text = soup.get_text(separator='\n')  # Clean text with newlines preserved
+          page_text = soup.get_text(separator='\n')
 
           links = []
           capture_next = False
@@ -96,7 +98,7 @@ jobs:
 
           print(f"Extracted {len(links)} links")
 
-          # 4. Base64 each link individually, then join with newlines
+          # 4. Base64 each link individually
           b64_lines = [base64.b64encode(link.encode('utf-8')).decode('utf-8') for link in links]
           content = '\n'.join(b64_lines)
 
