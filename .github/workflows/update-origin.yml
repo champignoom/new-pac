@@ -1,38 +1,126 @@
-name: Update Origin
+name: Update Subscription
 
 on:
   schedule:
     - cron: '0 * * * *'  # Runs once per hour at the start of the hour
-  workflow_dispatch:  # Allows manual triggering of the workflow
+  workflow_dispatch:  # Allows manual triggering
 
 permissions:
   contents: write
 
 jobs:
-  process:
+  update-subscription:
     runs-on: ubuntu-latest
-
     steps:
-      # Step 1: Checkout this repository
-      - name: Checkout this repository
-        uses: actions/checkout@v3
+      - name: Checkout repositorysubscribe-new-pac
+        uses: actions/checkout@v4
 
-      # Step 2: Clone the other repository
-      - name: Clone another repository
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Crawl freefq and generate subscribe-new-pac
         run: |
-          git clone https://github.com/Alvin9999/new-pac.wiki origin-new-pac
+          python - <<'PY'
+          import requests
+          from bs4 import BeautifulSoup
+          import re
+          import base64
 
-      # Step 5: Run your Python script
-      - name: Run script
-        run: |
-          sed -n '/```bash/{n;p}' origin-new-pac/v2ray免费账号.md | base64 > subscribe-new-pac
+          headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-      # Step 6: Commit and push changes
-      - name: Commit and push changes
+          # Step 1: Fetch category page and find latest post
+          cat_url = "https://freefq.com/v2ray/"
+          resp = requests.get(cat_url, headers=headers)
+          resp.raise_for_status()
+          soup = BeautifulSoup(resp.text, 'html.parser')
+
+          latest_post_url = None
+          max_date = None
+          date_pattern = re.compile(r'(\d{4}/\d{2}/\d{2})')
+
+          for a in soup.find_all('a', href=True):
+              if '免费v2ray账号分享' in a.get_text(strip=True) and a['href'].endswith('/v2ray.html'):
+                  href = a['href']
+                  full_url = href if href.startswith('http') else 'https://freefq.com' + href
+                  match = date_pattern.search(full_url)
+                  if match:
+                      post_date = match.group(1)
+                      if max_date is None or post_date > max_date:
+                          max_date = post_date
+                          latest_post_url = full_url
+
+          if not latest_post_url:
+              print("Error: No latest post found")
+              exit(1)
+
+          print(f"Latest post: {latest_post_url}")
+
+          # Step 2: Fetch post and extract the .htm link
+          post_resp = requests.get(latest_post_url, headers=headers)
+          post_resp.raise_for_status()
+          post_soup = BeautifulSoup(post_resp.text, 'html.parser')
+
+          htm_url = None
+          for a in post_soup.find_all('a', href=True):
+              if a['href'].endswith('.htm'):
+                  htm_url = a['href'] if a['href'].startswith('http') else 'https://www.freefq.com' + a['href']
+                  break
+
+          if not htm_url:
+              print("Error: No .htm link found")
+              exit(1)
+
+          print(f"Node page: {htm_url}")
+
+          # Step 3: Fetch .htm page and extract node links under 🚀 节点X
+          htm_resp = requests.get(htm_url, headers=headers)
+          htm_resp.raise_for_status()
+          text_lines = htm_resp.text.split('\n')
+
+          links = []
+          current_node = None
+          node_pattern = re.compile(r'🚀\s*节点\s*(\d+)')
+
+          for line in text_lines:
+              line = line.strip()
+              if node_pattern.search(line):
+                  current_node = True  # Activate collection until next node or end
+              elif current_node and re.match(r'^(vmess|vless|trojan|ss|hysteria2?)://', line):
+                  links.append(line)
+              elif current_node and node_pattern.search(line):
+                  current_node = True  # Next node starts
+              elif current_node and line == '':
+                  pass  # Allow empty lines
+              else:
+                  if current_node:
+                      current_node = False  # End of section if non-link/non-empty
+
+          if not links:
+              print("Warning: No node links found")
+
+          # Step 4: Join with newlines, base64 encode, write to file
+          content = '\n'.join(links)
+          b64_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+
+          with open('subscribe-new-pac', 'w') as f:
+              f.write(b64_content)
+
+          print(f"Generated subscribe-new-pac with {len(links)} links")
+          PY
+
+      - name: Commit and push if changed
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git add subscribe-new-pac
-          if git commit -m "update new-pac"; then
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Update subscribe-new-pac from freefq.com"
             git push
           fi
