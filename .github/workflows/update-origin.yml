@@ -1,18 +1,18 @@
-name: Update Subscription
+name: Update FreeFQ V2Ray Subscription
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Runs once per hour at the start of the hour
-  workflow_dispatch:  # Allows manual triggering
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  update-subscription:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repositorysubscribe-new-pac
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: Crawl freefq and generate subscribe-new-pac
+      - name: Crawl and generate subscribe-new-pac
         run: |
           python - <<'PY'
           import requests
@@ -33,93 +33,84 @@ jobs:
 
           headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-          # Step 1: Fetch category page and find latest post
-          cat_url = "https://freefq.com/v2ray/"
-          resp = requests.get(cat_url, headers=headers)
-          resp.raise_for_status()
-          soup = BeautifulSoup(resp.text, 'html.parser')
+          # 1. Root page - force GB2312
+          r = requests.get('https://freefq.com/v2ray/', headers=headers, timeout=30)
+          r.raise_for_status()
+          r.encoding = 'gb2312'
+          soup = BeautifulSoup(r.text, 'html.parser')
 
-          latest_post_url = None
-          max_date = None
-          date_pattern = re.compile(r'(\d{4}/\d{2}/\d{2})')
-
+          latest_url = None
           for a in soup.find_all('a', href=True):
-              if '免费v2ray账号分享' in a.get_text(strip=True) and a['href'].endswith('/v2ray.html'):
+              text = a.get_text(strip=True)
+              if '免费v2ray账号分享' in text and a['href'].endswith('v2ray.html'):
                   href = a['href']
-                  full_url = href if href.startswith('http') else 'https://freefq.com' + href
-                  match = date_pattern.search(full_url)
-                  if match:
-                      post_date = match.group(1)
-                      if max_date is None or post_date > max_date:
-                          max_date = post_date
-                          latest_post_url = full_url
+                  latest_url = 'https://freefq.com' + href if not href.startswith('http') else href
+                  break
 
-          if not latest_post_url:
-              print("Error: No latest post found")
+          if not latest_url:
+              print("ERROR: No latest post found")
               exit(1)
+          print(f"Latest post: {latest_url}")
 
-          print(f"Latest post: {latest_post_url}")
-
-          # Step 2: Fetch post and extract the .htm link
-          post_resp = requests.get(latest_post_url, headers=headers)
-          post_resp.raise_for_status()
-          post_soup = BeautifulSoup(post_resp.text, 'html.parser')
+          # 2. Post page - force GB2312
+          r = requests.get(latest_url, headers=headers, timeout=30)
+          r.raise_for_status()
+          r.encoding = 'gb2312'
+          soup = BeautifulSoup(r.text, 'html.parser')
 
           htm_url = None
-          for a in post_soup.find_all('a', href=True):
+          for a in soup.find_all('a', href=True):
               if a['href'].endswith('.htm'):
-                  htm_url = a['href'] if a['href'].startswith('http') else 'https://www.freefq.com' + a['href']
+                  href = a['href']
+                  htm_url = 'https://www.freefq.com' + href if not href.startswith('http') else href
                   break
 
           if not htm_url:
-              print("Error: No .htm link found")
+              print("ERROR: No .htm link found")
               exit(1)
+          print(f"Nodes page: {htm_url}")
 
-          print(f"Node page: {htm_url}")
-
-          # Step 3: Fetch .htm page and extract node links under 🚀 节点X
-          htm_resp = requests.get(htm_url, headers=headers)
-          htm_resp.raise_for_status()
-          text_lines = htm_resp.text.split('\n')
+          # 3. .htm page - force GB2312
+          r = requests.get(htm_url, headers=headers, timeout=30)
+          r.raise_for_status()
+          r.encoding = 'gb2312'
+          page_text = r.text
 
           links = []
-          current_node = None
-          node_pattern = re.compile(r'🚀\s*节点\s*(\d+)')
+          capture_next = False
+          import_pattern = re.compile(r'^节点\d.*一键导入链接')
 
-          for line in text_lines:
+          link_pattern = re.compile(r'^\w+://')  # Matches any word characters followed by ://
+
+          for line in page_text.splitlines():
               line = line.strip()
-              if node_pattern.search(line):
-                  current_node = True  # Activate collection until next node or end
-              elif current_node and re.match(r'^(vmess|vless|trojan|ss|hysteria2?)://', line):
+              if import_pattern.search(line):
+                  capture_next = True
+                  continue
+              if capture_next and link_pattern.match(line):
                   links.append(line)
-              elif current_node and node_pattern.search(line):
-                  current_node = True  # Next node starts
-              elif current_node and line == '':
-                  pass  # Allow empty lines
-              else:
-                  if current_node:
-                      current_node = False  # End of section if non-link/non-empty
+                  capture_next = False  # One link per "一键导入链接" section
 
           if not links:
-              print("Warning: No node links found")
+              print("WARNING: No links extracted")
 
-          # Step 4: Join with newlines, base64 encode, write to file
-          content = '\n'.join(links)
-          b64_content = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+          print(f"Extracted {len(links)} links")
 
-          with open('subscribe-new-pac', 'w') as f:
-              f.write(b64_content)
+          content = '\n'.join(links) + '\n'
+          b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
 
-          print(f"Generated subscribe-new-pac with {len(links)} links")
+          with open('subscribe-new-pac', 'w', encoding='utf-8') as f:
+              f.write(b64)
+
           PY
 
       - name: Commit and push if changed
         run: |
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add subscribe-new-pac
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No changes"
           else
             git commit -m "Update subscribe-new-pac from freefq.com"
             git push
